@@ -102,7 +102,8 @@ svg{display:block;}
 .card{position:relative;overflow:hidden;background:linear-gradient(180deg,var(--acc-soft,#fff) 0%,#fff 104px);
   border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:20px 20px 20px 22px;}
 .card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--acc,transparent);opacity:.9;}
-.card--info{--acc:#3B82F6;--acc-soft:#F4F8FF;}
+.card--info{--acc:#3B82F6;--acc-soft:#F4F8FF;padding:16px 20px 18px 22px;}
+.card--info .card__head{margin-bottom:12px;}
 .card--model{--acc:#0EA5E9;--acc-soft:#F3FAFF;}
 .card--upper{--acc:#22C55E;--acc-soft:#F5FDF8;}
 .card--lower{--acc:#14B8A6;--acc-soft:#F3FDFB;}
@@ -369,10 +370,7 @@ details.notes[open] summary::after{content:"－";}
       <span class="card__ico card__ico--n">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="8" r="3.3"/><path d="M5 20c0-3.3 3.1-5.9 7-5.9s7 2.6 7 5.9"/></svg>
       </span>
-      <div>
-        <h2 class="card__title">患者信息</h2>
-        <p class="card__sub">仅用于报告抬头，不参与计算</p>
-      </div>
+      <h2 class="card__title">患者信息</h2>
     </div>
     <div class="row" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:0;">
       <label class="field"><span class="field__label">姓名</span><input class="input" id="pt-name" placeholder="患者姓名"></label>
