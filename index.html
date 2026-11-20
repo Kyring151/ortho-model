@@ -246,8 +246,10 @@ details.notes[open] summary::after{content:"－";}
 .mv-chip{display:inline-flex;align-items:center;gap:2px;background:#F1F5F9;border-radius:5px;padding:3px 8px;
   font-size:11.5px;font-family:var(--mono);color:var(--t3);cursor:pointer;transition:.15s;}
 .mv-chip b{color:var(--t1);font-weight:700;}
-.mv-chip:hover{background:#FEE2E2;color:#DC2626;}
-.mv-chip:hover b{color:#DC2626;}
+.mv-chip:hover{background:#E2E8F0;color:var(--t2);}
+.mv-chip:hover b{color:var(--t1);}
+.mv-chip.on{background:#1B2A41;color:#fff;box-shadow:0 2px 6px rgba(16,24,40,.18);}
+.mv-chip.on b{color:#fff;}
 .mv-foot{display:flex;align-items:center;gap:12px;padding:9px 12px;border-top:1px solid var(--line-2);
   background:#FCFDFE;font-size:12.5px;color:var(--t3);flex-wrap:wrap;}
 .mv-stat{display:flex;align-items:baseline;gap:4px;}
@@ -461,7 +463,7 @@ details.notes[open] summary::after{content:"－";}
 
     <p class="mv-tip">
       单牙模式：每颗牙点两下，累加相邻两点距离得到牙齿总宽度。连续模式：沿牙弓依次点，累加得到牙弓长度，点越密越接近真实弧长，建议间距控制在 3mm 以内。
-      点偏了用「撤销」退回上一步，撤销一次退一个点。左键点选，右键拖动平移，滚轮缩放。上下拖拽到头还差一面时，点「翻转」。
+      点下方编号会在模型上把那颗牙的两端标成黑点，再点一次取消；双击编号才删除这一颗。点偏了用「撤销」退回上一步。左键点选，右键拖动平移，滚轮缩放。上下拖拽到头还差一面时，点「翻转」。
     </p>
   </section>
 
@@ -3391,6 +3393,7 @@ class ModelViewer {
     this.stats = { chain: 0, count: 0 };
     this.dotRadius = 1;
     this.anims = [];
+    this.selected = -1;
     this._popRef = null;
     this._growPair = null;
   }
@@ -3433,6 +3436,8 @@ class ModelViewer {
     this.matPending = new THREE.MeshBasicMaterial({ color: 0xF59E0B });
     this.matDone = new THREE.MeshBasicMaterial({ color: 0x22C55E });
     this.matLine = new THREE.LineBasicMaterial({ color: 0x4ADE80 });
+    this.matSel = new THREE.MeshBasicMaterial({ color: 0x111827 });
+    this.matSelLine = new THREE.LineBasicMaterial({ color: 0x111827 });
 
     this.raycaster = new THREE.Raycaster();
     this.mouse = new THREE.Vector2();
@@ -3488,6 +3493,7 @@ class ModelViewer {
   setMode(m){
     if (this.mode === m) return;
     this.mode = m;
+    this.selected = -1;
     this.pending = null;
     this.updateMarkers();
     this.updateStats();
@@ -3533,6 +3539,7 @@ class ModelViewer {
   }
 
   undo(){
+    this.selected = -1;
     if (this.mode === 'pair'){
       if (this.pending) this.pending = null;
       else this.pairs.pop();
@@ -3554,6 +3561,7 @@ class ModelViewer {
   }
 
   clear(){
+    this.selected = -1;
     if (this.mode === 'pair'){
       this.pairs = [];
       this.pending = null;
@@ -3575,10 +3583,10 @@ class ModelViewer {
     const popRef = this._popRef; this._popRef = null;
     const growPair = this._growPair; this._growPair = null;
 
-    const dot = (v, mat) => {
+    const dot = (v, mat, mul) => {
       const m = new THREE.Mesh(this.dotGeo, mat);
       m.position.copy(v);
-      const base = this.dotRadius;
+      const base = this.dotRadius * (mul || 1);
 
       if (popRef && popRef === v){
         m.scale.setScalar(base * 0.06);
@@ -3616,10 +3624,19 @@ class ModelViewer {
     };
 
     if (this.mode === 'pair'){
-      this.pairs.forEach(p => {
-        line(p.a, p.b, growPair === p);
-        dot(p.a, this.matDone);
-        dot(p.b, this.matDone);
+      this.pairs.forEach((p, i) => {
+        const on = i === this.selected;
+        if (on){
+          /* 选中那颗：黑色粗线 + 加大的黑点，一眼看出是哪颗牙的两端 */
+          const geo = new THREE.BufferGeometry().setFromPoints([p.a, p.b]);
+          const l = new THREE.Line(geo, this.matSelLine);
+          l.userData.tempGeo = true;
+          g.add(l);
+        } else {
+          line(p.a, p.b, growPair === p);
+        }
+        dot(p.a, on ? this.matSel : this.matDone, on ? 2.1 : 1);
+        dot(p.b, on ? this.matSel : this.matDone, on ? 2.1 : 1);
       });
       if (this.pending) dot(this.pending, this.matPending);
     } else {
@@ -3669,11 +3686,19 @@ class ModelViewer {
     if (!el) return;
     if (this.mode !== 'pair' || !this.pairs.length){ el.innerHTML = ''; return; }
     el.innerHTML = this.pairs.map((p, i) =>
-      '<span class="mv-chip" data-i="' + i + '">' + (i + 1) + '\u00b7<b>' + p.len.toFixed(1) + '</b></span>'
+      '<span class="mv-chip' + (i === this.selected ? ' on' : '') + '" data-i="' + i +
+      '" title="点击在模型上高亮，双击删除这颗重测">' + (i + 1) + '\u00b7<b>' + p.len.toFixed(1) + '</b></span>'
     ).join('');
     el.querySelectorAll('.mv-chip').forEach(ch => {
+      const i = parseInt(ch.dataset.i, 10);
       ch.addEventListener('click', () => {
-        this.pairs.splice(parseInt(ch.dataset.i, 10), 1);
+        this.selected = (this.selected === i) ? -1 : i;
+        this.updateMarkers();
+        this.renderChips();
+      });
+      ch.addEventListener('dblclick', () => {
+        this.pairs.splice(i, 1);
+        this.selected = -1;
         this.updateMarkers();
         this.updateStats();
       });
@@ -3754,6 +3779,7 @@ class ModelViewer {
     this.controls.target.set(0, 0, 0);
     this.controls.update();
 
+    this.selected = -1;
     this.clear();
     this.emptyEl.style.display = 'none';
   }
