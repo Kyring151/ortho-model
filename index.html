@@ -3691,12 +3691,19 @@ class ModelViewer {
     ).join('');
     el.querySelectorAll('.mv-chip').forEach(ch => {
       const i = parseInt(ch.dataset.i, 10);
+      let t = null;
       ch.addEventListener('click', () => {
-        this.selected = (this.selected === i) ? -1 : i;
-        this.updateMarkers();
-        this.renderChips();
+        /* 等一下再执行，双击时第一击不要先高亮一遍 */
+        if (t){ clearTimeout(t); t = null; return; }
+        t = setTimeout(() => {
+          t = null;
+          this.selected = (this.selected === i) ? -1 : i;
+          this.updateMarkers();
+          this.renderChips();
+        }, 190);
       });
       ch.addEventListener('dblclick', () => {
+        if (t){ clearTimeout(t); t = null; }
         this.pairs.splice(i, 1);
         this.selected = -1;
         this.updateMarkers();
