@@ -235,6 +235,8 @@ details.notes[open] summary::after{content:"－";}
 .btn--xs.btn--green{background:var(--green);border-color:var(--green);color:#fff;}
 .mv-canvas{position:relative;height:440px;background:linear-gradient(180deg,#F5FAFF 0%,#DCE9F7 100%);cursor:crosshair;overflow:hidden;}
 .mv-canvas canvas{display:block;}
+.mv-canvas.is-handle{cursor:grab;}
+.mv-canvas.is-drag{cursor:grabbing;}
 .mv-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;
   color:#8A98AA;font-size:13.5px;pointer-events:none;text-align:center;line-height:1.7;}
 .mv-empty svg{opacity:.5;}
@@ -463,7 +465,7 @@ details.notes[open] summary::after{content:"－";}
 
     <p class="mv-tip">
       单牙模式：每颗牙点两下，累加相邻两点距离得到牙齿总宽度。连续模式：沿牙弓依次点，累加得到牙弓长度，点越密越接近真实弧长，建议间距控制在 3mm 以内。
-      点下方编号会在模型上把那颗牙的两端标成黑点，再点一次取消；双击编号才删除这一颗。点偏了用「撤销」退回上一步。左键点选，右键拖动平移，滚轮缩放。上下拖拽到头还差一面时，点「翻转」。
+      点下方编号会在模型上把那颗牙的两端标成黑点，此时可以按住黑点拖动微调，宽度会实时更新；再点一次编号取消高亮，双击编号才删除这一颗。点偏了用「撤销」退回上一步。左键点选，右键拖动平移，滚轮缩放。上下拖拽到头还差一面时，点「翻转」。
     </p>
   </section>
 
@@ -3394,6 +3396,9 @@ class ModelViewer {
     this.dotRadius = 1;
     this.anims = [];
     this.selected = -1;
+    this.dragEnd = null;
+    this._dragPos = null;
+    this._suppressPick = 0;
     this._popRef = null;
     this._growPair = null;
   }
@@ -3461,7 +3466,24 @@ class ModelViewer {
       if (!leftDown || e.button !== 0) return;
       leftDown = false;
       if (Math.hypot(e.clientX - dx, e.clientY - dy) > 4) return;
+      if (performance.now() - this._suppressPick < 260) return;
       this.pick(e);
+    });
+
+    /* 选中某颗牙后，它两端的黑点可以拖动微调。
+       只在这一颗的端点上响应，所以不影响正常落点 */
+    this.container.addEventListener('pointerdown', e => {
+      if (e.button !== 0 || !this.mesh) return;
+      const key = this.hitHandle(e);
+      if (!key) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this.beginHandleDrag(key);
+    }, true);
+
+    el.addEventListener('pointermove', e => {
+      if (this.dragEnd || !this.mesh) return;
+      this.container.classList.toggle('is-handle', !!this.hitHandle(e));
     });
     el.addEventListener('pointercancel', () => { leftDown = false; });
 
@@ -3548,6 +3570,54 @@ class ModelViewer {
     }
     this.updateMarkers();
     this.updateStats();
+  }
+
+  /* 选中那颗牙的两个端点，屏幕投影后判断是否按在上面 */
+  hitHandle(e){
+    if (this.selected < 0 || !this.mesh) return null;
+    const pair = this.pairs[this.selected];
+    if (!pair) return null;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const px = e.clientX - rect.left, py = e.clientY - rect.top;
+    const v = new THREE.Vector3();
+    let best = null, bestD = 14;
+    ['a', 'b'].forEach(key => {
+      v.copy(pair[key]);
+      this.root.localToWorld(v).project(this.camera);
+      const sx = (v.x * 0.5 + 0.5) * rect.width;
+      const sy = (-v.y * 0.5 + 0.5) * rect.height;
+      const d = Math.hypot(sx - px, sy - py);
+      if (d < bestD){ bestD = d; best = key; }
+    });
+    return best;
+  }
+
+  beginHandleDrag(key){
+    this.controls.enabled = false;
+    this.container.classList.add('is-drag');
+    this.dragEnd = key;
+    this._dragPos = null;
+
+    const move = ev => {
+      const hit = this.raycastAt(ev);
+      /* 拖动时收小吸附半径，不然想微调会被牙沟拽走 */
+      if (hit) this._dragPos = this.snap(hit, (this.snapRadius || 0) * 0.45);
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', up, true);
+      window.removeEventListener('pointercancel', up, true);
+      this.dragEnd = null;
+      this._dragPos = null;
+      this.controls.enabled = true;
+      this._suppressPick = performance.now();
+      this.container.classList.remove('is-handle', 'is-drag');
+      this.updateMarkers();
+      this.updateStats();
+    };
+    window.addEventListener('pointermove', move, true);
+    window.addEventListener('pointerup', up, true);
+    window.addEventListener('pointercancel', up, true);
   }
 
   /* 轨道相机的极角只有 180°（正上方到正下方），越过极点靠拖拽做不到。
@@ -4116,6 +4186,18 @@ class ModelViewer {
   render(){
     if (!this.ready) return;
     this.controls.update();
+
+    if (this._dragPos && this.dragEnd){
+      const pair = this.pairs[this.selected];
+      const p = this._dragPos;
+      this._dragPos = null;
+      if (pair){
+        pair[this.dragEnd].copy(p);
+        pair.len = pair.a.distanceTo(pair.b);
+        this.updateMarkers();
+        this.updateStats();
+      }
+    }
     this.stepAnims();
     if (this.headLight){
       const p = this.camera.position;
