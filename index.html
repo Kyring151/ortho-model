@@ -406,6 +406,7 @@ details.notes[open] summary::after{content:"－";}
           <label class="btn btn--xs" for="file-u">上传 STL</label>
           <input id="file-u" type="file" accept=".stl" hidden>
           <button class="btn btn--xs" id="undo-u">撤销</button>
+          <button class="btn btn--xs" id="flip-u" title="沿画面水平轴翻转 180°，看另一面">翻转</button>
           <button class="btn btn--xs" id="clear-u">清空</button>
         </div>
         <div class="mv-canvas" id="canvas-u">
@@ -433,6 +434,7 @@ details.notes[open] summary::after{content:"－";}
           <label class="btn btn--xs" for="file-l">上传 STL</label>
           <input id="file-l" type="file" accept=".stl" hidden>
           <button class="btn btn--xs" id="undo-l">撤销</button>
+          <button class="btn btn--xs" id="flip-l" title="沿画面水平轴翻转 180°，看另一面">翻转</button>
           <button class="btn btn--xs" id="clear-l">清空</button>
         </div>
         <div class="mv-canvas" id="canvas-l">
@@ -459,7 +461,7 @@ details.notes[open] summary::after{content:"－";}
 
     <p class="mv-tip">
       单牙模式：每颗牙点两下，累加相邻两点距离得到牙齿总宽度。连续模式：沿牙弓依次点，累加得到牙弓长度，点越密越接近真实弧长，建议间距控制在 3mm 以内。
-      点偏了用「撤销」退回上一步，撤销一次退一个点。左键点选，右键拖动平移，滚轮缩放。
+      点偏了用「撤销」退回上一步，撤销一次退一个点。左键点选，右键拖动平移，滚轮缩放。上下拖拽到头还差一面时，点「翻转」。
     </p>
   </section>
 
@@ -3420,8 +3422,12 @@ class ModelViewer {
     this.controls.rotateSpeed = 0.85;
     this.controls.zoomSpeed = 0.9;
 
+    /* 网格与标记都挂在 root 下：翻转时整体旋转，标点跟着模型走 */
+    this.root = new THREE.Group();
+    this.scene.add(this.root);
+
     this.markerGroup = new THREE.Group();
-    this.scene.add(this.markerGroup);
+    this.root.add(this.markerGroup);
 
     this.dotGeo = new THREE.SphereGeometry(1, 14, 14);
     this.matPending = new THREE.MeshBasicMaterial({ color: 0xF59E0B });
@@ -3470,7 +3476,7 @@ class ModelViewer {
     this.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.mouse, this.camera);
     const hits = this.raycaster.intersectObject(this.mesh, false);
-    return hits.length ? hits[0].point.clone() : null;
+    return hits.length ? this.root.worldToLocal(hits[0].point.clone()) : null;
   }
 
   pick(e){
@@ -3514,7 +3520,7 @@ class ModelViewer {
 
   /* 落点附近浮出这一段长度，1 秒后褪去 */
   flashLen(p, len){
-    const v = p.clone().project(this.camera);
+    const v = this.root.localToWorld(p.clone()).project(this.camera);
     if (v.z > 1 || v.z < -1) return;
     const w = this.container.clientWidth, h = this.container.clientHeight;
     const el = document.createElement('div');
@@ -3535,6 +3541,16 @@ class ModelViewer {
     }
     this.updateMarkers();
     this.updateStats();
+  }
+
+  /* 轨道相机的极角只有 180°（正上方到正下方），越过极点靠拖拽做不到。
+     这里把模型整体绕画面水平轴翻 180°，等效补上看不到的那一面 */
+  flip(){
+    if (!this.mesh) return;
+    const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0).normalize();
+    const q = new THREE.Quaternion().setFromAxisAngle(right, Math.PI);
+    this.root.quaternion.premultiply(q);
+    this.root.updateMatrixWorld(true);
   }
 
   clear(){
@@ -3684,8 +3700,10 @@ class ModelViewer {
   }
 
   setGeometry(geo){
+    /* 换模型时把翻转复位，避免新模型一上来就是倒的 */
+    if (this.root) this.root.quaternion.identity();
     if (this.mesh){
-      this.scene.remove(this.mesh);
+      this.root.remove(this.mesh);
       this.mesh.geometry.dispose();
       this.mesh.material.dispose();
     }
@@ -3724,7 +3742,7 @@ class ModelViewer {
     });
 
     this.mesh = new THREE.Mesh(work, mat);
-    this.scene.add(this.mesh);
+    this.root.add(this.mesh);
 
     const maxDim = Math.max(size.x, size.y, size.z);
     this.dotRadius = maxDim * 0.0062;
@@ -4182,6 +4200,7 @@ async function bootModels(){
     });
     document.getElementById('undo-' + s).addEventListener('click', () => v.undo());
     document.getElementById('clear-' + s).addEventListener('click', () => v.clear());
+    document.getElementById('flip-' + s).addEventListener('click', () => v.flip());
     document.getElementById('fill-' + s).addEventListener('click', () => {
       const tag = s === 'u' ? '上' : '下';
       if (v.mode === 'pair'){
